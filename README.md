@@ -23,7 +23,7 @@ This notebook demonstrates how to integrate an existing **LangGraph agent** with
 
 
 This notebook is configured to work with a NVIDIA API Endpoints:
-- **Model**: `meta-llama/llama-3.1-70b-instruct`
+- **Model**: `meta-llama/llama-3.3-70b-instruct`
 
 
 ## Notebook Structure
