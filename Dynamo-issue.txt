@@ -1,0 +1,64 @@
+Issue: Kubernetes Startup Probe Fails with Connection Refused and 503
+
+vllmdecodeworker Pod Errors:
+Pod events show:
+Warning  Unhealthy  9m39s                  kubelet            Startup probe failed: Get "http://172.29.179.28:9090/live": dial tcp 172.29.179.28:9090: connect: connection refused
+Warning  Unhealthy  8m19s (x8 over 9m29s)  kubelet            Startup probe failed: HTTP probe failed with statuscode: 503
+
+Probe configuration from pod describe:
+- Liveness: http-get http://:system/live delay=0s timeout=30s period=5s #success=1 #failure=1
+- Readiness: http-get http://:system/health delay=0s timeout=30s period=10s #success=1 #failure=60
+- Startup: http-get http://:system/live delay=0s timeout=5s period=10s #success=1 #failure=720
+
+Error from vllmdecodeworker Pod Logs: Repeated 503 Service Unavailable on /live Endpoint
+2025-12-02T10:19:04.958943Z  WARN dynamo_runtime::config: DYN_SYSTEM_USE_ENDPOINT_HEALTH_STATUS is deprecated and no longer used. System health is now determined by endpoints that register with health check payloads. Please update your configuration to register health check payloads directly on endpoints.
+2025-12-02T10:19:05.364740Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+2025-12-02T10:19:15.364279Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+2025-12-02T10:19:25.364640Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+2025-12-02T10:19:35.364078Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+2025-12-02T10:19:45.364532Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+2025-12-02T10:19:55.363949Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+2025-12-02T10:20:05.364209Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+2025-12-02T10:20:15.364226Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=GET uri=/live version=HTTP/1.1
+
+Manual Health Check Results
+When checked manually, the pod health endpoint responds as expected:
+curl http://localhost:9090/health
+{"status":"ready","uptime":{"secs":508,"nanos":156477321},"endpoints":{"generate":"ready","clear_kv_blocks":"ready"}}
+
+curl http://172.29.179.28:9090/health
+{"status":"ready","uptime":{"secs":530,"nanos":131452045},"endpoints":{"clear_kv_blocks":"ready","generate":"ready"}}
+
+Unable to Access Model Inference Endpoint
+
+When attempting to access the model inference endpoint from inside the container:
+Attempted Model Inference Request
+
+Tried the following curl command inside the container:
+curl localhost:8000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "/models/Llama-3.2-3B-Instruct",
+        "messages": [
+            {
+                "role": "user",
+                "content": "In the heart of Eldoria, an ancient land of boundless magic and mysterious creatures, lies the long-forgotten city of Aeloria. Once a beacon of knowledge and power, Aeloria was buried beneath the shifting sands of time, lost to the world for centuries. You are an intrepid explorer, known for your unparalleled curiosity and courage, who has stumbled upon an ancient map hinting at ests that Aeloria holds a secret so profound that it has the potential to reshape the very fabric of reality. Your journey will take you through treacherous deserts, enchanted forests, and across perilous mountain ranges. Your Task: Character Background: Develop a detailed background for your character. Describe their motivations for seeking out Aeloria, their skills and weaknesses, and any personal connections to the ancient city or its legends. Are they driven by a quest for knowledge, a search for lost familt clue is hidden."
+            }
+        ],
+        "stream": false,
+        "max_tokens": 100
+    }'
+
+Received error:
+curl: (7) Failed to connect to localhost port 8000 after 0 ms: Couldn't connect to server
+Received Service Unavailable error when trying to access the endpoint from outside the container (e.g., via Postman).
+
+Error logs from Frontend Pod : 
+Pod logs show:
+2025-12-02T10:20:24.656530Z  WARN dynamo_llm::hub: ModelExpress download failed for model '/models/Llama-3.2-3B-Instruct': Failed to fetch model '/models/Llama-3.2-3B-Instruct' from HuggingFace. Is this a valid HuggingFace ID? Error: request error: HTTP status client error (404 Not Found) for url (https://huggingface.co/api/models//models/Llama-3.2-3B-Instruct/revision/main)
+2025-12-02T10:20:24.656562Z ERROR dynamo_llm::discovery::watcher: Error adding model from discovery model_name="/models/Llama-3.2-3B-Instruct" namespace="vllm-agg" error="Failed to fetch model '/models/Llama-3.2-3B-Instruct' from HuggingFace. Is this a valid HuggingFace ID? Error: request error: HTTP status client error (404 Not Found) for url (https://huggingface.co/api/models//models/Llama-3.2-3B-Instruct/revision/main)"
+2025-12-02T10:34:07.869710Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=POST uri=/v1/chat/completions version=HTTP/1.1 x_request_id="392eb3f2-02a0-45b4-8748-f96251822f0c"
+2025-12-02T10:34:07.879958Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=POST uri=/v1/chat/completions version=HTTP/1.1 x_request_id="392eb3f2-02a0-45b4-8748-f96251822f0c"
+2025-12-02T10:34:07.880023Z ERROR http-request: tower_http::trace::on_failure: response failed classification=Status code: 503 Service Unavailable latency=0 ms method=POST uri=/v1/chat/completions version=HTTP/1.1 x_request_id="392eb3f2-02a0-45b4-8748-f96251822f0c"
+
+The deployment YAML is configured to use a local model path (/models/Llama-3.2-3B-Instruct). However, the frontend pod is attempting to load the model from Hugging Face. The frontend should not attempt to load or access the model; only the worker pod requires the model path for inference.

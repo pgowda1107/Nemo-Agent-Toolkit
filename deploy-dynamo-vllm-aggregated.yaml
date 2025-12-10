@@ -1,0 +1,95 @@
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: llama32-3b-dynamo
+  namespace: dynamo-infer
+spec:
+  envs:
+  - name: DYN_LOG
+    value: "debug"
+  - name: http_proxy
+    value: http://10.67.99.155:443
+  - name: https_proxy
+    value: http://10.67.99.155:443
+  - name: no_proxy
+    value: "localhost,127.0.0.1,0.0.0.0"
+  services:
+    Frontend:
+      dynamoNamespace: vllm-agg
+      componentType: frontend
+      replicas: 1
+      resources: # frontend assuming entire cluster of GPUs and it will work with only CPUs hopefully. 
+        limits: #overriding to avoid scheduling issues. else we are CPU allocation issues and expecting GPUs to be there in the node.
+          gpu: "1" # we have configured separate node for CPUs which pod is redirected to in absense of GPU allocation.
+        requests:
+          gpu: "0"
+      envs:
+        - name: DYN_ROUTER_MODE
+          value: kv
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1.post1
+          imagePullPolicy: IfNotPresent
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      dynamoNamespace: vllm-agg
+      componentType: worker
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+        requests:
+          gpu: "1"
+      extraPodSpec:
+        volumes:
+          - emptyDir: {}
+            name: storage-vol
+          - name: s3-utility-vol
+            secret:
+              defaultMode: 420
+              secretName: s3-h100-cert 
+        initContainers:
+        - name: storage-initializer
+          image: infyartifactory.jfrog.io/ainadel-mms-project-customized/aicloud-storage-initializer:v1.0
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                key: awsAccessKeyID
+                name: nutanix-secret-1
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                key: awsSecretAccessKey
+                name: nutanix-secret-1
+          envFrom:
+          - configMapRef:
+              name: nutanix-configuration
+          args:
+            - s3://aicloudprd/foundational_model/meta-llama/Meta-Llama-3.2-3B-Instruct
+            - /models/Llama-3.2-3B-Instruct
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          volumeMounts:
+            - mountPath: /models/Llama-3.2-3B-Instruct
+              name: storage-vol
+            - mountPath: /s3cert
+              name: s3-utility-vol
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.1.post1
+          imagePullPolicy: IfNotPresent
+          workingDir: /workspace/components/backends/vllm
+          volumeMounts:
+            - mountPath: /models/Llama-3.2-3B-Instruct
+              name: storage-vol
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 -m dynamo.vllm --model /models/Llama-3.2-3B-Instruct
